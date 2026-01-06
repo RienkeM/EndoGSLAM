@@ -13,7 +13,7 @@ class ImageProcessor:
     def __init__(self, calibration_params):
         self.calibration_params = calibration_params
 
-    def undisort(self, color: np.ndarray, depth: np.ndarray):
+    def undistort(self, color: np.ndarray, depth: np.ndarray):
         K = np.array([[self.calibration_params['fx'], 0, self.calibration_params['cx']],
                       [0, self.calibration_params['fy'], self.calibration_params['cy']],
                       [0, 0, 1]])
@@ -31,7 +31,7 @@ def process_file(folder_path, filename, processor):
     depth_file_path = os.path.join(depth_folder_path, filename.replace('color', 'depth').replace('png', 'tiff'))
     depth = np.asarray(Image.open(depth_file_path).convert("I"), dtype=np.float64)
     
-    processed_color, processed_depth = processor.undisort(image, depth)
+    processed_color, processed_depth = processor.undistort(image, depth)
     os.makedirs(folder_path.replace('color_raw', 'color'), exist_ok=True)
     os.makedirs(depth_folder_path.replace('depth_raw', 'depth'), exist_ok=True)
     Image.fromarray(np.uint8(processed_color), 'RGB').save(file_path.replace('color_raw', 'color'))
@@ -62,7 +62,7 @@ def process_folders(root_folder, calibration_params):
             process_image(folder_path, processor)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process and undisort color and depth images in dataset folders.")
+    parser = argparse.ArgumentParser(description="Process and undistort color and depth images in dataset folders.")
     parser.add_argument("--root_path", default=".", help="Path to the root folder of the dataset.")
     
     args = parser.parse_args()
