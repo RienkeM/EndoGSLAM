@@ -5,6 +5,9 @@ import sys
 import time
 from importlib.machinery import SourceFileLoader
 
+import open3d as o3d # NEW
+
+
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 sys.path.insert(0, _BASE_DIR)
@@ -386,8 +389,62 @@ def convert_params_to_store(params):
             params_to_store[k] = v
     return params_to_store
 
+def toggle_pause(vis): # NEW
+    print("\n[VIS] Interactivity triggered! You have 10 seconds to rotate/zoom...")
+    # This loop allows the mouse to work without the SLAM trying to crunch numbers
+    start_time = time.time()
+    while time.time() - start_time < 10: 
+        vis.poll_events()
+        vis.update_renderer()
+    print("[VIS] Resuming SLAM mapping...\n")
 
-def rgbd_slam(config: dict):
+def calculate_color_pcd(params, pcd): # NEW
+    # # Option 1: gaussian center colors
+    # cols_np = torch.sigmoid(params['rgb_colors']).detach().cpu().numpy() # apply sigmoid to get colors, move to CPU, convert to numpy
+    # pcd.colors = o3d.utility.Vector3dVector(cols_np)
+
+    # Option 2: depth based rgb scale
+    # 1. Get Depth and Auto-Scale
+    z = params['means3D'][:, 2].detach()
+    z_min = z.min()
+    z_max = z.max()
+
+    # Auto-normalize so the closest point is 0.0 and furthest is 1.0
+    v = torch.clamp((z - z_min) / (z_max - z_min + 1e-5), 0.0, 1.0) 
+
+    # 2. Calculate Jet Color Ramps (No changes needed here)
+    r = torch.clamp(torch.min(4 * v - 1.5, -4 * v + 4.5), 0.0, 1.0)
+    g = torch.clamp(torch.min(4 * v - 0.5, -4 * v + 3.5), 0.0, 1.0)
+    b = torch.clamp(torch.min(4 * v + 0.5, -4 * v + 2.5), 0.0, 1.0)
+
+    # 3. Stack and move to CPU
+    cols_np = torch.stack([r, g, b], dim=-1).cpu().numpy()
+    pcd.colors = o3d.utility.Vector3dVector(cols_np)
+
+    # # Option 3: Keep colon-ish colors
+    # # 1. Get raw logit colors
+    # raw_cols = params['rgb_colors'].detach()
+
+    # # 2. Normalize the logits to use the full dynamic range
+    # # This stretches the "muddy" colors out so they cover more shades
+    # c_min = raw_cols.min()
+    # c_max = raw_cols.max()
+    # norm_cols = (raw_cols - c_min) / (c_max - c_min + 1e-5)
+
+    # # 3. Apply a "Gamma" correction to brighten the dark areas of the colon
+    # # Values < 1.0 brighten mid-tones; 0.7 is a good "endoscope" sweet spot
+    # bright_cols = torch.pow(norm_cols, 0.7)
+
+    # # 4. Final Sigmoid isn't strictly needed if you normalized above, 
+    # # but we'll clamp to be safe for Open3D
+    # cols_np = torch.clamp(bright_cols, 0.0, 1.0).cpu().numpy()
+
+    # pcd.colors = o3d.utility.Vector3dVector(cols_np)
+    
+    return pcd
+
+
+def rgbd_slam(config: dict, args):
     # timer = Timer()
     # timer.start()
     
@@ -602,6 +659,15 @@ def rgbd_slam(config: dict):
     
     # timer.lap("all the config")
     
+    if args.online_vis:
+        pcd = o3d.geometry.PointCloud()
+        # Convert the initial state to the correct format
+        initial_pts = params['means3D'].detach().cpu().numpy()
+        pcd.points = o3d.utility.Vector3dVector(initial_pts)
+        pcd = calculate_color_pcd(params, pcd)
+
+        vis.add_geometry(pcd)
+
     # Iterate over Scan
     for time_idx in tqdm(range(checkpoint_time_idx, num_frames)):
         
@@ -889,6 +955,51 @@ def rgbd_slam(config: dict):
             save_params_ckpt(params, ckpt_output_dir, time_idx)
             np.save(os.path.join(ckpt_output_dir, f"keyframe_time_indices{time_idx}.npy"), np.array(keyframe_time_indices))
         
+        if args.online_vis:
+# ----------------  OPTIONS TO UPDATE AND NAVIGATE THE 3D RECONSTRUCTION  -------------------
+            # vis.poll_events()      # <--- This allows mouse clicks/rotation
+            # vis.update_renderer()  # <--- This redraws the window
+
+            # (0) Update every frame
+            pts_np = params['means3D'].detach().cpu().numpy() # convert the tensor to a numpy array on the CPU
+            pcd.points = o3d.utility.Vector3dVector(pts_np)
+            pcd = calculate_color_pcd(params, pcd)
+            vis.update_geometry(pcd)
+
+            # vis.poll_events()      
+            # vis.update_renderer()  
+
+            # # (1) Don't update every frame, only every xx. But do allow for navigation
+            # if time_idx % 15 == 0:        
+            #     pts_np = params['means3D'].detach().cpu().numpy() # convert the tensor to a numpy array on the CPU
+            #     pcd.points = o3d.utility.Vector3dVector(pts_np)
+            #     pcd = calculate_color_pcd(params, pcd)
+            #     vis.update_geometry(pcd)
+
+            # vis.poll_events()      
+            # vis.update_renderer()  
+
+            # (2) [combined with 0 or 1] Run xx small GUI updates for every 1 SLAM update
+            for i in range(10): 
+                vis.poll_events()
+                vis.update_renderer()
+                time.sleep(0.01) # Give the CPU a millisecond to catch mouse movements
+
+            # (3) use toggle_pause() function. Will pause everytime you hit the key P
+            # pts_np = params['means3D'].detach().cpu().numpy() # convert the tensor to a numpy array on the CPU
+            # pcd.points = o3d.utility.Vector3dVector(pts_np)
+            # pcd = calculate_color_pcd(params, pcd)
+
+            # vis.update_geometry(pcd)
+            # vis.poll_events()      
+            # vis.update_renderer()
+                # vis = o3d.visualization.VisualizerWithKeyCallback() # Change these lines below
+                # vis.register_key_callback(80, toggle_pause)
+
+
+            # (x) vis.run() # This stops the code here and gives full mouse control to the window until it is closed again. However, the pop-up should be opened again.
+
+# --------------------------------------------------------------------------------------------------------
 
         torch.cuda.empty_cache()
 
@@ -942,7 +1053,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("experiment", type=str, help="Path to experiment file")
-    # parser.add_argument("--online_vis", action="store_true", help="Visualize mapping renderings while running")
+    parser.add_argument("--online_vis", action="store_true", help="Visualize mapping renderings while running")
 
     args = parser.parse_args()
 
@@ -951,11 +1062,21 @@ if __name__ == "__main__":
     ).load_module()
 
     # Prepare dir for visualization
-    # if args.online_vis:
-    #     vis_dir = './online_vis'
-    #     os.makedirs(vis_dir, exist_ok=True)
-    #     for filename in os.listdir(vis_dir):
-    #         os.unlink(os.path.join(vis_dir, filename))
+    if args.online_vis:
+        # vis_dir = './online_vis'
+        # os.makedirs(vis_dir, exist_ok=True)
+        # for filename in os.listdir(vis_dir):
+        #     os.unlink(os.path.join(vis_dir, filename))
+
+        # ----------- NEW ---------
+        vis = o3d.visualization.Visualizer()
+        # vis = o3d.visualization.VisualizerWithKeyCallback()
+        cfg = experiment.config["viz"]
+        vis.create_window(width=int(cfg['viz_w'] * cfg['view_scale']), 
+                        height=int(cfg['viz_h'] * cfg['view_scale']),
+                        visible=True, window_name="Training Progress")
+        # vis.register_key_callback(80, toggle_pause)
+        # --------------------------
 
     # Set Experiment Seed
     seed_everything(seed=experiment.config['seed'])
@@ -968,6 +1089,6 @@ if __name__ == "__main__":
         os.makedirs(results_dir, exist_ok=True)
         shutil.copy(args.experiment, os.path.join(results_dir, "config.py"))
 
-    rgbd_slam(experiment.config)
+    rgbd_slam(experiment.config, args) # added the args as input
     
     plot_video(os.path.join(results_dir, 'eval', 'plots'), os.path.join('./experiments/', experiment.group_name, experiment.scene_name, 'keyframes'))
