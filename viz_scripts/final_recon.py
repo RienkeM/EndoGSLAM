@@ -174,7 +174,7 @@ def rgbd2pcd(color, depth, w2c, intrinsics, cfg):
 
 def visualize(scene_path, cfg):
     # Load Scene Data
-    w2c, k = load_camera(cfg, scene_path)
+    w2c, k = load_camera(cfg, scene_path)  # the w2c that is the matrix in the first frame (thus single frame novel view rendering)
 
     scene_data, scene_depth_data, all_w2cs = load_scene_data(scene_path, w2c, k)
 
@@ -258,8 +258,9 @@ def visualize(scene_path, cfg):
         if time() - ts > 0.033:
             if len(w2cs) == 613 // 8 * 7 + 7: # 765, 700, 613
                 np.save("w2cs.npy", np.array(w2cs))
-                exit()
-            print(len(w2cs))
+                # exit()
+                break  # in order to save the .ply 
+            print(len(w2cs)) # NOT the frame count from the video, but the # of interactive camera poses recorded during your navigation
             w2cs.append(w2c)
             ts = time()
         
@@ -286,12 +287,24 @@ def visualize(scene_path, cfg):
     del view_control
     del vis
     del render_options
+    return pcd
 
 
 if __name__ == "__main__":
+    
+    """"
+    Rendering: It takes the entire collection of Gaussians (the global map, means3D.ply and params.npz) and uses a renderer
+    to create a 2D RGB image and a 2D depth map from your current camera viewpoint.
+
+    Back-projection: The function rgbd2pcd takes that 2D image and uses the depth values to calculate a 3D position for each pixel.
+
+    The Result: Because this point cloud is built from a single 2D image, it only contains the points that were visible to the 
+    camera at that exact moment. Anything behind the "walls" of the colon or outside the camera's field of view is missing.
+    """
+
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("experiment", type=str, help="Path to experiment file")
+    parser.add_argument("experiment", type=str, help="Path to experiment config file")
 
     args = parser.parse_args()
 
@@ -310,5 +323,11 @@ if __name__ == "__main__":
         scene_path = experiment.config["scene_path"]
     viz_cfg = experiment.config["viz"]
 
-    # Visualize Final Reconstruction
-    visualize(scene_path, viz_cfg)
+    # Visualize Final reconstruction
+    final_pcd = visualize(scene_path, viz_cfg)
+
+    # Save novel view rendering
+    # save_path = os.path.join(os.path.dirname(args.experiment), "reconstruction.ply")
+
+    # print(f"Saving PLY to: {save_path}")
+    # o3d.io.write_point_cloud(save_path, final_pcd)
