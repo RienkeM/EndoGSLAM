@@ -1,6 +1,7 @@
 import os
 
 scenes = [
+    "cecum_t1_a",
     "cecum_t1_b", 
     "cecum_t2_b", 
     "cecum_t3_a", 
