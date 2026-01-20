@@ -14,8 +14,15 @@ records
 configs/c3vd/mass_exps
 *.npy
 *.mp4
+*.ply
 
 notes.txt
 playground.ipynb
 .vscode
 *.tar.gz
+data/preprocess_c3vd/cecum_t1_a
+data/preprocess_c3vd/sigmoid_t3_a
+scene.txt
+
+.ipynb_checkpoints/
+shutil
