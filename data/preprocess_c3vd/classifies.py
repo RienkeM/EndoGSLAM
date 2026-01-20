@@ -1,3 +1,4 @@
+# changed the name
 import os
 import shutil
 import argparse
@@ -37,7 +38,9 @@ def process_folders(root_folder):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Classify files in dataset folders based on their types.")
-    parser.add_argument("--dataset_path", default="./data/C3VD", help="Path to the dataset root folder. Default is './data'.")
+    # parser.add_argument("--dataset_path", default="./data/C3VD", help="Path to the dataset root folder. Default is './data'.")
+    parser.add_argument("--dataset_path", default=".", help="Path to the dataset root folder. Default is './data'.")
+
     args = parser.parse_args()
 
     process_folders(args.dataset_path)
